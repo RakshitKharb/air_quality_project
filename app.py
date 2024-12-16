@@ -2,10 +2,11 @@ import streamlit as st
 import numpy as np
 from datetime import datetime, timedelta
 from lab_pred import fetch_openaq_data_parallel, create_sequences, build_multi_output_model
-from tensorflow.keras.models import load_model
+#from tensorflow.keras.models import load_model
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import os
+from sklearn.preprocessing import MinMaxScaler
 
 # Load API Key
 load_dotenv()
