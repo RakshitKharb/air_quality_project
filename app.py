@@ -45,7 +45,7 @@ if st.button("Fetch and Predict Data"):
 
             if df is not None and not df.empty:
                 st.success("Data fetched successfully!")
-                st.write("Data Preview:", df.tail())
+                #st.write("Data Preview:", df.tail())
 
                 # Scale the data
                 st.write("Preparing data for prediction...")
@@ -81,7 +81,7 @@ if st.button("Fetch and Predict Data"):
                 # Generate future timestamps
                 future_index = [df.index[-1] + timedelta(hours=i+1) for i in range(future_steps)]
                 future_df = pd.DataFrame(inverse_predictions, columns=parameters, index=future_index)
-                st.write("Future Predictions DataFrame:", future_df)
+                #st.write("Future Predictions DataFrame:", future_df)
 
                 # Combine actual and predicted data for display
                 combined_df = pd.concat([df, future_df])
