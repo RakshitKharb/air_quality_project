@@ -1,18 +1,19 @@
 import streamlit as st
 import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from lab_pred import fetch_openaq_data_parallel, create_sequences, build_multi_output_model
-#from tensorflow.keras.models import load_model
-import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from sklearn.preprocessing import MinMaxScaler
 from dotenv import load_dotenv
 import os
-from sklearn.preprocessing import MinMaxScaler
 
 # Load API Key
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 
-# Streamlit App
+# Streamlit App Title
 st.title("Air Quality Monitoring and Prediction")
 
 # User Inputs
@@ -24,8 +25,9 @@ parameters = st.multiselect(
 )
 start_date = st.date_input("Start Date", value=datetime.now() - timedelta(days=30))
 end_date = st.date_input("End Date", value=datetime.now())
-predict_future = st.checkbox("Predict Future Air Quality", value=True)
+future_steps = st.number_input("Number of Future Steps to Predict", min_value=1, value=24)
 
+# Button to trigger data fetching and prediction
 if st.button("Fetch and Predict Data"):
     if not API_KEY:
         st.error("API key is missing. Please configure it in the .env file.")
@@ -40,43 +42,89 @@ if st.button("Fetch and Predict Data"):
                 end_date=end_date.strftime("%Y-%m-%d"),
                 api_key=API_KEY
             )
+
             if df is not None and not df.empty:
                 st.success("Data fetched successfully!")
-                st.write("Data Preview:", df.head())
+                st.write("Data Preview:", df.tail())
 
-                if predict_future:
-                    # Prepare data for prediction
-                    st.write("Preparing data for prediction...")
-                    scaler = MinMaxScaler()
-                    scaled_data = scaler.fit_transform(df.fillna(0))
-                    input_data, target_data = create_sequences(
-                        scaled_data, time_steps=60, target_indices=list(range(len(parameters)))
-                    )
+                # Scale the data
+                st.write("Preparing data for prediction...")
+                scaler = MinMaxScaler()
+                scaled_data = scaler.fit_transform(df.fillna(0))
 
-                    # Load or build LSTM model
-                    model = build_multi_output_model(input_shape=input_data.shape[1:], num_outputs=len(parameters))
-                    st.write("Training multi-output LSTM model...")
-                    model.fit(input_data, target_data, epochs=5, batch_size=32, verbose=1)
+                # Prepare input data
+                input_data, _ = create_sequences(
+                    scaled_data, time_steps=60, target_indices=list(range(len(parameters)))
+                )
 
-                    # Predict future air quality
-                    st.write("Predicting future air quality...")
-                    predictions = model.predict(input_data[-1].reshape(1, *input_data[-1].shape))
+                # Train LSTM model
+                st.write("Training multi-output LSTM model...")
+                model = build_multi_output_model(input_shape=input_data.shape[1:], num_outputs=len(parameters))
+                model.fit(input_data, input_data[:, -1, :len(parameters)], epochs=5, batch_size=32, verbose=1)
 
-                    # Visualize predictions
-                    st.write("Visualizing predictions...")
-                    plt.figure(figsize=(12, 6))
-                    for i, param in enumerate(parameters):
-                        plt.plot(df.index[-60:], df[param].iloc[-60:], label=f"Actual {param.upper()}")
-                        plt.plot([df.index[-1] + timedelta(hours=i) for i in range(1, len(predictions[0]) + 1)],
-                                 predictions[0][:, i], label=f"Predicted {param.upper()}", linestyle="--")
-                    plt.title("Actual vs. Predicted Air Quality")
-                    plt.xlabel("Time")
-                    plt.ylabel("Concentration")
-                    plt.legend()
-                    plt.grid()
-                    st.pyplot(plt)
+                # Rolling Predictions for Multiple Future Steps
+                st.write("Generating multiple future predictions...")
+                last_sequence = input_data[-1]  # Get the last input sequence
+                future_predictions = []
+
+                for _ in range(future_steps):
+                    next_pred = model.predict(last_sequence.reshape(1, *last_sequence.shape))
+                    future_predictions.append(next_pred[0])  # Append the predicted step
+                    # Update sequence for next prediction
+                    last_sequence = np.vstack((last_sequence[1:], next_pred[0]))
+
+                # Inverse-transform predictions to original scale
+                inverse_predictions = scaler.inverse_transform(
+                    np.hstack((np.array(future_predictions), np.zeros((future_steps, scaled_data.shape[1] - len(parameters)))))
+                )[:, :len(parameters)]
+
+                # Generate future timestamps
+                future_index = [df.index[-1] + timedelta(hours=i+1) for i in range(future_steps)]
+                future_df = pd.DataFrame(inverse_predictions, columns=parameters, index=future_index)
+                st.write("Future Predictions DataFrame:", future_df)
+
+                # Combine actual and predicted data for display
+                combined_df = pd.concat([df, future_df])
+
+                # Visualization with Plotly
+                st.write("Visualizing Actual and Predicted Data...")
+                fig = go.Figure()
+
+                # Plot actual data
+                for param in parameters:
+                    fig.add_trace(go.Scatter(
+                        x=df.index,
+                        y=df[param],
+                        mode='lines',
+                        name=f"Actual {param.upper()}",
+                        line=dict(color='blue')
+                    ))
+
+                # Plot predicted data
+                for param in parameters:
+                    fig.add_trace(go.Scatter(
+                        x=future_df.index,
+                        y=future_df[param],
+                        mode='lines',
+                        name=f"Predicted {param.upper()}",
+                        line=dict(dash='dash', color='red')
+                    ))
+
+                # Update layout for interactivity
+                fig.update_layout(
+                    title="Actual vs Predicted Air Quality",
+                    xaxis_title="Time",
+                    yaxis_title="Concentration",
+                    xaxis=dict(rangeslider=dict(visible=True), type="date"),
+                    template="plotly_white"
+                )
+
+                # Display the plot
+                st.plotly_chart(fig)
+
             else:
                 st.warning("No data available for the selected parameters.")
+
         except Exception as e:
             st.error(f"Error: {e}")
     else:

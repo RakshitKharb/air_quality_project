@@ -1,5 +1,27 @@
 import requests
 import pandas as pd
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+def create_sequences(data, time_steps=60, target_indices=None):
+    """
+    Creates input sequences and target outputs for LSTM.
+
+    Parameters:
+    - data (np.array): Scaled data array.
+    - time_steps (int): Number of past time steps to include.
+    - target_indices (list): Indices of target parameters.
+
+    Returns:
+    - X (np.array): Input sequences.
+    - y (np.array): Target outputs.
+    """
+    X, y = [], []
+    for i in range(len(data) - time_steps):
+        X.append(data[i:i + time_steps])
+        y.append(data[i + time_steps][target_indices])
+    return np.array(X), np.array(y)
 
 def fetch_parameter_data(param, city, start_date, end_date, headers):
     base_url = "https://api.openaq.org/v2/measurements"
@@ -50,3 +72,24 @@ def fetch_openaq_data_parallel(city, parameters, start_date, end_date, api_key):
         return df
     else:
         return None
+
+def build_multi_output_model(input_shape, num_outputs):
+    """
+    Builds and compiles a multi-output LSTM model.
+
+    Parameters:
+    - input_shape (tuple): Shape of the input data (time_steps, features).
+    - num_outputs (int): Number of output parameters to predict.
+
+    Returns:
+    - model (Sequential): Compiled multi-output LSTM model.
+    """
+    model = Sequential()
+    model.add(LSTM(100, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.2))
+    model.add(LSTM(100, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(50, activation='relu'))
+    model.add(Dense(num_outputs))  # Output layer for multiple regression targets
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
